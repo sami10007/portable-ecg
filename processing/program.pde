@@ -1,5 +1,8 @@
 import processing.serial.*;
 
+#define USART_TOKEN_ECG_DATA_TO_DRAW      0xFF
+#define USART_TOKEN_HEART_BEAT_TO_BEEP    0xFE
+
 Serial port;      // Create object from Serial class
 int val;              // Data received from the serial port
 float val2;
@@ -9,6 +12,11 @@ int wm1;
 int[] values;
 PFont f;
 PGraphics buffer;
+
+/* BPM */
+int lastValue;
+unsigned long lastPeakTime; 
+int bpm;
 
 void setup() 
 {
@@ -82,4 +90,52 @@ void draw() {
   //    line(x-1, hht - values[x-1], x, hht - values[x]);    //increment the data line
   //  }
   //}
+}
+
+void serialEvent(Serial p) {
+  if(p.avaiable()) {
+    switch(p.read()) {
+      case USART_TOKEN_ECG_DATA_TO_DRAW:
+        /*
+          Vai ter duas variaveis: LastValue and LastPeakTime
+          Para cada novo valor obtido, ele sera comparado com o LastValue para checar se o mesmo é 100% maior que o LastValue.
+          Caso seja, isso significa que o valor atual é um pico, e o tempo deve ser setado no LastPeakTime(caso seja o primeiro pico)
+          ou deve pegar o tempo e comparar com o LastPeakTime para obter o BPM, subtraindo os tempos e dividindo por 60000(?)
+        */
+        int value = (p.read() << 8) & ~(0x00FF);
+        value |= (p.read() & ~(0xFF00));
+        
+        bpm = calculateBPM(value);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+int calculateBPM(int value) {
+  int ret = 0;
+  
+  if(lastValue == 0) {
+    lastValue = value;
+  } else {
+    // Peak detection
+    if(value >= 2*lastValue) {
+      if(lastPeakTime == 0) {
+        lastPeakTime = millis();
+        sendPeakSignalToArduino();
+      } else {
+        unsigned long actualPeakTime = millis();
+        unsigned long peakRate = actualPeakTime - lastPeakTime;
+        
+        ret = (int)(60000/peakRate);
+      }
+    }
+  }
+  
+  return ret;
+} 
+
+void sendPeakSignalToArduino() {
+  p.write(USART_TOKEN_HEART_BEAT_TO_BEEP);
 }
